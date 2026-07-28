@@ -56,6 +56,12 @@ function initApp() {
             db = firebase.firestore();
             auth = firebase.auth();
             
+            // Handle redirect result for mobile devices
+            auth.getRedirectResult().catch(error => {
+                console.error("Redirect auth error:", error);
+                showToast("❌ Login failed: " + error.message, "error");
+            });
+            
             // Setup real-time authentication observer
             auth.onAuthStateChanged(handleAuthStateChanged);
         } catch (error) {
@@ -135,27 +141,31 @@ function setupEventListeners() {
     const tabBtnStream = document.getElementById('tabBtnStream');
     const tabBtnChecklist = document.getElementById('tabBtnChecklist');
 
-    // Textarea Auto-grow
-    taskInput.addEventListener('input', function() {
-        this.style.height = 'auto';
-        this.style.height = (this.scrollHeight - 4) + 'px';
-    });
-
-    // Handle submissions
-    btnTodo.addEventListener('click', () => {
+    // Handle submissions via Form Submit (handles mobile keyboard "Go"/"Send")
+    const chatForm = document.getElementById('chatForm');
+    chatForm.addEventListener('submit', (e) => {
+        e.preventDefault();
         handleTaskSubmission('todo');
     });
 
-    btnDone.addEventListener('click', () => {
-        handleTaskSubmission('done');
-    });
+    const handleTodoSubmit = (e) => {
+        e.preventDefault();
+        handleTaskSubmission('todo');
+    };
 
-    // Keyboard Shortcuts
+    const handleDoneSubmit = (e) => {
+        e.preventDefault();
+        handleTaskSubmission('done');
+    };
+
+    btnTodo.addEventListener('click', handleTodoSubmit);
+    btnTodo.addEventListener('touchend', handleTodoSubmit);
+
+    btnDone.addEventListener('click', handleDoneSubmit);
+    btnDone.addEventListener('touchend', handleDoneSubmit);
+
+    // Keyboard Shortcuts (for desktop)
     taskInput.addEventListener('keydown', (e) => {
-        if (e.key === 'Enter' && !e.shiftKey && !e.ctrlKey && !e.metaKey) {
-            e.preventDefault();
-            handleTaskSubmission('todo');
-        }
         if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
             e.preventDefault();
             handleTaskSubmission('done');
@@ -421,9 +431,23 @@ function createAndAddTask(text, type, customTimestamp = null) {
         if (ownerUid) newTask.ownerUid = ownerUid;
         newTask.createdBy = state.user.uid;
 
+        // Optimistically render task in UI locally first
+        const tempId = 'temp_' + Date.now();
+        const optimisticTask = { id: tempId, ...newTask };
+        state.tasks.push(optimisticTask);
+        state.tasks.sort((a, b) => (a.timestamp || 0) - (b.timestamp || 0));
+        renderChatList();
+        renderTasks();
+        renderChecklistPanel();
+
         db.collection('tasks').add(newTask).catch(error => {
             console.error("Failed to add task:", error);
             showToast("❌ Database write failed.", "error");
+            // Rollback optimistic update
+            state.tasks = state.tasks.filter(t => t.id !== tempId);
+            renderChatList();
+            renderTasks();
+            renderChecklistPanel();
         });
     } else {
         newTask.id = 'task_' + Math.random().toString(36).substr(2, 9) + '_' + Date.now();
@@ -477,16 +501,36 @@ function attemptToCompleteMatchingTodo(searchText) {
     }
 
     if (match) {
+        const now = Date.now();
+        const prevStatus = match.status;
+        const prevCompletedTimestamp = match.completedTimestamp;
+
+        // Optimistic local update
         match.status = 'completed';
-        match.completedTimestamp = Date.now();
-        
-        saveTasks();
+        match.completedTimestamp = now;
         renderChatList();
         renderTasks();
         renderChecklistPanel();
-        
         highlightTaskBubble(match.id);
         showToast(`✨ Completed matching task: "${match.text.split(' #')[0]}"`, "success");
+
+        if (isFirebaseEnabled) {
+            db.collection('tasks').doc(match.id).update({
+                status: 'completed',
+                completedTimestamp: now
+            }).catch(error => {
+                console.error("Failed to complete matched task in Firebase:", error);
+                showToast("❌ Database write failed.", "error");
+                // Rollback optimistic update
+                match.status = prevStatus;
+                match.completedTimestamp = prevCompletedTimestamp;
+                renderChatList();
+                renderTasks();
+                renderChecklistPanel();
+            });
+        } else {
+            saveTasks();
+        }
         return true;
     }
 
@@ -534,50 +578,68 @@ window.toggleTaskStatus = function(taskId) {
     const isCompleted = task.status === 'completed';
     const newStatus = isCompleted ? 'pending' : 'completed';
     const now = Date.now();
+    
+    const prevStatus = task.status;
+    const prevCompletedTimestamp = task.completedTimestamp;
+
+    // Optimistic local update
+    task.status = newStatus;
+    task.completedTimestamp = newStatus === 'completed' ? now : null;
+    renderChatList();
+    renderTasks();
+    renderChecklistPanel();
+
+    if (newStatus === 'completed') {
+        showToast("Task completed! 🎉", "success");
+    } else {
+        showToast("Task marked as pending.", "info");
+    }
 
     if (isFirebaseEnabled) {
         db.collection('tasks').doc(taskId).update({
             status: newStatus,
             completedTimestamp: newStatus === 'completed' ? now : null
-        }).then(() => {
-            if (newStatus === 'completed') {
-                showToast("Task completed! 🎉", "success");
-            } else {
-                showToast("Task marked as pending.", "info");
-            }
         }).catch(error => {
-            console.error("Failed to update status:", error);
+            console.error("Failed to update status in Firebase:", error);
+            showToast("❌ Database write failed.", "error");
+            // Rollback optimistic update
+            task.status = prevStatus;
+            task.completedTimestamp = prevCompletedTimestamp;
+            renderChatList();
+            renderTasks();
+            renderChecklistPanel();
         });
     } else {
-        task.status = newStatus;
-        task.completedTimestamp = newStatus === 'completed' ? now : null;
-        if (newStatus === 'completed') {
-            showToast("Task completed! 🎉", "success");
-        } else {
-            showToast("Task marked as pending.", "info");
-        }
         saveTasks();
-        renderChatList();
-        renderTasks();
-        renderChecklistPanel();
     }
 };
 
 window.deleteTask = function(taskId) {
     if (confirm("Delete this message?")) {
+        const deletedTask = state.tasks.find(t => t.id === taskId);
+        if (!deletedTask) return;
+
+        const prevTasks = [...state.tasks];
+
+        // Optimistic local update
+        state.tasks = state.tasks.filter(t => t.id !== taskId);
+        renderChatList();
+        renderTasks();
+        renderChecklistPanel();
+        showToast("Deleted");
+
         if (isFirebaseEnabled) {
-            db.collection('tasks').doc(taskId).delete().then(() => {
-                showToast("Deleted");
-            }).catch(error => {
-                console.error("Failed to delete task:", error);
+            db.collection('tasks').doc(taskId).delete().catch(error => {
+                console.error("Failed to delete task in Firebase:", error);
+                showToast("❌ Database write failed.", "error");
+                // Rollback optimistic update
+                state.tasks = prevTasks;
+                renderChatList();
+                renderTasks();
+                renderChecklistPanel();
             });
         } else {
-            state.tasks = state.tasks.filter(t => t.id !== taskId);
             saveTasks();
-            renderChatList();
-            renderTasks();
-            renderChecklistPanel();
-            showToast("Deleted");
         }
     }
 };
@@ -625,6 +687,24 @@ function saveEditedTask() {
         }
     }
 
+    const prevText = task.text;
+    const prevTags = [...task.tags];
+    const prevType = task.type;
+    const prevStatus = task.status;
+    const prevCompletedTimestamp = task.completedTimestamp;
+
+    // Optimistic local update
+    task.text = newText;
+    task.tags = newTags;
+    task.type = newType;
+    task.status = status;
+    task.completedTimestamp = completedTimestamp;
+    
+    renderChatList();
+    renderTasks();
+    renderChecklistPanel();
+    showToast("Updated");
+
     if (isFirebaseEnabled) {
         db.collection('tasks').doc(taskId).update({
             text: newText,
@@ -632,23 +712,21 @@ function saveEditedTask() {
             type: newType,
             status: status,
             completedTimestamp: completedTimestamp
-        }).then(() => {
-            showToast("Updated");
         }).catch(error => {
-            console.error("Failed to edit task:", error);
+            console.error("Failed to edit task in Firebase:", error);
+            showToast("❌ Database write failed.", "error");
+            // Rollback optimistic update
+            task.text = prevText;
+            task.tags = prevTags;
+            task.type = prevType;
+            task.status = prevStatus;
+            task.completedTimestamp = prevCompletedTimestamp;
+            renderChatList();
+            renderTasks();
+            renderChecklistPanel();
         });
     } else {
-        task.text = newText;
-        task.tags = newTags;
-        task.type = newType;
-        task.status = status;
-        task.completedTimestamp = completedTimestamp;
-
         saveTasks();
-        renderChatList();
-        renderTasks();
-        renderChecklistPanel();
-        showToast("Updated");
     }
     
     document.getElementById('editModal').classList.remove('open');
@@ -1524,10 +1602,21 @@ async function handleAuthStateChanged(user) {
 function loginWithGoogle() {
     if (!isFirebaseEnabled) return;
     const provider = new firebase.auth.GoogleAuthProvider();
-    auth.signInWithPopup(provider).catch(error => {
-        console.error("Google login failed:", error);
-        showToast("❌ Sign-in failed: " + error.message, "error");
-    });
+    
+    // Detect mobile device to switch between popup and redirect auth flows
+    const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
+    
+    if (isMobile) {
+        auth.signInWithRedirect(provider).catch(error => {
+            console.error("Google login redirect failed:", error);
+            showToast("❌ Sign-in failed: " + error.message, "error");
+        });
+    } else {
+        auth.signInWithPopup(provider).catch(error => {
+            console.error("Google login failed:", error);
+            showToast("❌ Sign-in failed: " + error.message, "error");
+        });
+    }
 }
 
 function logout() {

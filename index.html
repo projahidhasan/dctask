@@ -138,14 +138,14 @@
             <footer class="chat-input-panel" id="chatInputPanel">
                 <form id="chatForm" class="chat-form" onsubmit="return false;">
                     <div class="input-wrapper">
-                        <textarea 
+                        <input 
+                            type="text"
                             id="taskInput" 
                             placeholder="Type a task... Use #tags to categorize." 
-                            rows="1" 
                             required 
                             autocomplete="off"
                             aria-label="New task content"
-                        ></textarea>
+                        >
                     </div>
                     <div class="buttons-dock">
                         <button type="button" class="btn-input btn-todo" id="btnTodo" title="Add as To-Do (Enter)" aria-label="Add as To-Do">
