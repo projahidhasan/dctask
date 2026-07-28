@@ -1,0 +1,292 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>TealTask - Conversational Task Tracker</title>
+    <!-- Google Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&family=Inter:wght@300;400;500;600&display=swap" rel="stylesheet">
+    <!-- Style Sheet -->
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <!-- Local Mode Warning Banner -->
+    <div class="local-banner" id="localModeBanner" style="display: none;">
+        <span>⚠️ Running in Local Demo Mode. Configure Firebase in app.js to enable Google Sign-In & Team Tracking.</span>
+    </div>
+
+    <div class="app-container">
+        <!-- 1. LEFT SIDEBAR (WhatsApp Chats Panel) -->
+        <aside class="sidebar" id="sidebar">
+            <div class="sidebar-header">
+                <div class="user-profile">
+                    <div class="avatar" id="userAvatar">TT</div>
+                    <div class="user-info">
+                        <h2 id="userDisplayName">TealTask</h2>
+                        <span class="status-online" id="userRoleBadge">online</span>
+                    </div>
+                </div>
+                <div class="header-menu-container">
+                    <button class="menu-trigger-btn" id="sidebarMenuBtn" title="Menu" aria-label="Menu">
+                        <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M12 5h.01M12 12h.01M12 19h.01" />
+                        </svg>
+                    </button>
+                    <div class="dropdown-menu" id="sidebarDropdown">
+                        <button type="button" id="exportBtn" title="Export data">📤 Export Tasks</button>
+                        <button type="button" id="importBtn" title="Import data">📥 Import Tasks</button>
+                        <button type="button" id="clearAllBtn" class="danger-btn danger-item" title="Clear all tasks">🧹 Clear Space</button>
+                        <button type="button" id="logoutBtn" style="display: none;" title="Logout">🚪 Logout</button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Search Area -->
+            <div class="search-container">
+                <div class="search-wrapper">
+                    <svg class="search-icon" xmlns="http://www.w3.org/2000/svg" width="18" height="18" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+                    </svg>
+                    <input type="text" id="searchInput" placeholder="Search or start new list..." aria-label="Search lists">
+                </div>
+            </div>
+
+            <!-- Chat / List Categories -->
+            <div class="chat-list-container">
+                <div class="chat-list" id="chatList" role="navigation" aria-label="List categories">
+                    <!-- Conversations loaded dynamically -->
+                </div>
+
+                <!-- Team Section (Visible to Business Owners only) -->
+                <div class="team-section" id="teamSection" style="display: none;">
+                    <div class="team-header">
+                        <span>👥 TEAM MEMBERS</span>
+                        <button class="add-team-btn" id="addTeamBtn" title="Invite member">+</button>
+                    </div>
+                    <div class="chat-list" id="teamList">
+                        <!-- Loaded dynamically -->
+                    </div>
+                </div>
+            </div>
+
+            <input type="file" id="importFileInput" accept=".json" style="display: none;">
+        </aside>
+
+        <!-- 2. CENTER PANEL (Chat Timeline & Feed) -->
+        <main class="chat-area" id="chatArea">
+            <!-- Chat Header -->
+            <header class="chat-header">
+                <div class="chat-header-info">
+                    <!-- Back button on Mobile -->
+                    <button class="back-btn" id="backBtn" aria-label="Back to lists">
+                        <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 19l-7-7m0 0l7-7m-7 7h18"/>
+                        </svg>
+                    </button>
+                    
+                    <div class="header-avatar" id="headerAvatar">💬</div>
+                    <div class="header-text-container">
+                        <h1 class="chat-title" id="chatTitle">All Tasks</h1>
+                        <p class="chat-subtitle" id="chatSubtitle">0 tasks pending</p>
+                    </div>
+                </div>
+                
+                <div class="header-actions">
+                    <button class="header-action-link" id="loadDemoBtn" title="Load Demo Stream">Demo Tasks</button>
+                </div>
+            </header>
+
+            <!-- Workspace Banner for Employees -->
+            <div class="employee-indicator-banner" id="workspaceBanner" style="display: none;"></div>
+
+            <!-- Mobile Only Tab Navigation -->
+            <nav class="mobile-tab-nav" id="mobileTabNav">
+                <button class="tab-btn active" id="tabBtnStream" data-tab="stream">
+                    💬 Chat Stream
+                </button>
+                <button class="tab-btn" id="tabBtnChecklist" data-tab="checklist">
+                    📋 Active Checklist
+                </button>
+            </nav>
+
+            <!-- Chat Stream Scroll View -->
+            <section class="chat-history" id="chatHistory" role="log" aria-label="Task stream">
+                <!-- Welcome instructions (Hidden when tasks are loaded) -->
+                <div class="welcome-container" id="welcomeMessage">
+                    <div class="welcome-card">
+                        <h3>TealTask Chat 📝</h3>
+                        <p>A minimalist task tracker built inside a chat interface. Send messages to log tasks just like messaging yourself.</p>
+                        <ul>
+                            <li>Type a task below.</li>
+                            <li>Press <strong>+ To-Do</strong> (or <code>Enter</code>) to add it to your list.</li>
+                            <li>Press <strong>✓ Done</strong> (or <code>Ctrl+Enter</code>) to complete it.</li>
+                            <li>Use hashtags like <code>#work</code>, <code>#home</code> to create auto-categories in the sidebar.</li>
+                        </ul>
+                        <button class="demo-trigger-btn" id="welcomeDemoBtn">Load Sample Tasks</button>
+                    </div>
+                </div>
+                
+                <!-- Chat bubbles loaded dynamically -->
+            </section>
+
+            <!-- Alerts / Notifications -->
+            <div class="toast-container" id="toastContainer"></div>
+
+            <!-- Bottom Chat Input Panel -->
+            <footer class="chat-input-panel" id="chatInputPanel">
+                <form id="chatForm" class="chat-form" onsubmit="return false;">
+                    <div class="input-wrapper">
+                        <textarea 
+                            id="taskInput" 
+                            placeholder="Type a task... Use #tags to categorize." 
+                            rows="1" 
+                            required 
+                            autocomplete="off"
+                            aria-label="New task content"
+                        ></textarea>
+                    </div>
+                    <div class="buttons-dock">
+                        <button type="button" class="btn-input btn-todo" id="btnTodo" title="Add as To-Do (Enter)" aria-label="Add as To-Do">
+                            <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4" />
+                            </svg>
+                        </button>
+                        <button type="button" class="btn-input btn-done" id="btnDone" title="Mark as Completed (Ctrl+Enter)" aria-label="Mark as Completed">
+                            <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7" />
+                            </svg>
+                        </button>
+                    </div>
+                </form>
+            </footer>
+        </main>
+
+        <!-- 3. RIGHT PANEL (Structured Task Checklist) -->
+        <aside class="checklist-panel" id="checklistPanel">
+            <div class="checklist-header">
+                <h3>Structured Checklist</h3>
+                <span class="checklist-subtitle" id="checklistActiveCategory">All Tasks</span>
+            </div>
+            
+            <!-- KPI Metrics Section (Visible for Owners viewing Employee Timelines) -->
+            <div id="kpiStatsContainer" style="padding: 16px 20px 0 20px; display: none;"></div>
+            
+            <div class="checklist-scroll-container">
+                <!-- Pending Checklist Section -->
+                <section class="checklist-group">
+                    <h4 class="group-title">📌 PENDING TASKS (<span id="pendingCountLabel">0</span>)</h4>
+                    <div class="checklist-list" id="pendingTasksList">
+                        <!-- Pending task items loaded dynamically -->
+                        <div class="empty-state">No pending tasks. Write one in the chat!</div>
+                    </div>
+                </section>
+                
+                <!-- Completed Checklist Section -->
+                <section class="checklist-group">
+                    <h4 class="group-title">✓ COMPLETED TASKS (<span id="completedCountLabel">0</span>)</h4>
+                    <div class="checklist-list" id="completedTasksList">
+                        <!-- Completed task items loaded dynamically -->
+                        <div class="empty-state">No completed tasks yet.</div>
+                    </div>
+                </section>
+            </div>
+        </aside>
+    </div>
+
+    <!-- Edit Modal Dialog -->
+    <div class="modal-overlay" id="editModal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3>Edit Task</h3>
+                <button class="modal-close" id="modalCloseBtn">&times;</button>
+            </div>
+            <div class="modal-body">
+                <textarea id="editTaskInput" rows="3"></textarea>
+                <div class="modal-type-selection">
+                    <label>Type:</label>
+                    <div class="modal-type-options">
+                        <label class="radio-container">
+                            <input type="radio" name="modalTaskType" value="todo" id="radioTodo">
+                            <span class="custom-radio"></span> To-Do
+                        </label>
+                        <label class="radio-container">
+                            <input type="radio" name="modalTaskType" value="done" id="radioDone">
+                            <span class="custom-radio"></span> Completed
+                        </label>
+                    </div>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-secondary" id="modalCancelBtn">Cancel</button>
+                <button class="btn btn-primary" id="modalSaveBtn">Save</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Auth / Login Overlay -->
+    <div class="auth-overlay" id="authOverlay" style="display: none;">
+        <div class="auth-card">
+            <div class="auth-logo">💬</div>
+            <h1>TealTask Chat</h1>
+            <p>Chat your way to peak productivity. Organize notes, tasks, and teams.</p>
+            <button class="google-login-btn" id="googleLoginBtn">
+                <svg class="google-icon" viewBox="0 0 24 24" width="18" height="18" xmlns="http://www.w3.org/2000/svg">
+                    <path d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" fill="#4285F4"/>
+                    <path d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" fill="#34A853"/>
+                    <path d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.06H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.94l2.85-2.22.81-.63z" fill="#FBBC05"/>
+                    <path d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.06l3.66 2.84c.87-2.6 3.3-4.52 6.16-4.52z" fill="#EA4335"/>
+                </svg>
+                Sign in with Google
+            </button>
+        </div>
+    </div>
+
+    <!-- Onboarding / Role Selection Overlay -->
+    <div class="auth-overlay" id="onboardingOverlay" style="display: none;">
+        <div class="onboarding-card">
+            <h2>Welcome to TealTask!</h2>
+            <p>Select your workspace setup to get started:</p>
+            <div class="role-options">
+                <button class="role-card" id="rolePersonalBtn">
+                    <span class="role-icon">👤</span>
+                    <h3>Personal Space</h3>
+                    <p>For individual task tracking & quick notes.</p>
+                </button>
+                <button class="role-card" id="roleOwnerBtn">
+                    <span class="role-icon">🏢</span>
+                    <h3>Business/Team Space</h3>
+                    <p>For managing teams, adding employees, and tracking KPIs.</p>
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Invite Team Member Modal -->
+    <div class="modal-overlay" id="inviteModal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3>Invite Team Member</h3>
+                <button class="modal-close" id="inviteModalCloseBtn">&times;</button>
+            </div>
+            <div class="modal-body">
+                <p style="margin-bottom: 12px; font-size: 14px; color: var(--text-secondary);">Enter the Google email of the employee you want to invite to your workspace.</p>
+                <input type="email" id="inviteEmailInput" placeholder="employee@gmail.com" style="width: 100%; padding: 10px; border-radius: 8px; border: 1px solid var(--border-color); background: var(--bg-primary); color: var(--text-primary); font-family: inherit;">
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-secondary" id="inviteCancelBtn">Cancel</button>
+                <button class="btn btn-primary" id="inviteSubmitBtn">Send Invitation</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Firebase Compat SDKs -->
+    <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-auth-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore-compat.js"></script>
+
+    <!-- App Scripts -->
+    <script src="app.js?v=2"></script>
+</body>
+</html>
