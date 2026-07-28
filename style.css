@@ -1158,7 +1158,13 @@ body {
     /* Hide checklist panel by default on desktop/tablet split */
     .checklist-panel {
         display: none;
-        width: 100% !important;
+        position: absolute;
+        left: 320px; /* Sidebar width */
+        width: calc(100% - 320px) !important;
+        top: 104px;
+        height: calc(100% - 104px);
+        background-color: var(--whatsapp-chat-bg);
+        z-index: 10;
         border-left: none;
     }
     
@@ -1201,6 +1207,18 @@ body {
         border-right: none;
     }
     
+    body.mobile-view-checklist .checklist-panel {
+        display: flex;
+        position: absolute;
+        left: 100vw;
+        top: 104px;
+        width: 100vw !important;
+        height: calc(100% - 104px);
+        background-color: var(--whatsapp-chat-bg);
+        z-index: 10;
+        border-left: none;
+    }
+    
     .back-btn {
         display: flex;
     }
@@ -1219,6 +1237,34 @@ body {
         width: 36px;
         height: 36px;
         justify-content: center;
+    }
+}
+
+@media (max-width: 576px) {
+    .auth-card, .onboarding-card {
+        padding: 24px 16px !important;
+        margin: 10px;
+    }
+    .role-options {
+        grid-template-columns: 1fr !important;
+        gap: 12px !important;
+    }
+    .auth-logo {
+        font-size: 40px !important;
+        margin-bottom: 12px !important;
+    }
+    .header-action-link {
+        padding: 4px 8px !important;
+        font-size: 11px !important;
+    }
+    .chat-header {
+        padding: 10px 12px;
+    }
+    .chat-input-panel {
+        padding: 8px 12px;
+    }
+    .chat-form {
+        gap: 8px;
     }
 }
 

@@ -1642,6 +1642,7 @@ function bindTasksListener() {
             renderChatList();
             renderTasks();
             renderChecklistPanel();
+            setTimeout(scrollToBottom, 50);
         }, error => {
             console.error("Tasks sync query error:", error);
         });
