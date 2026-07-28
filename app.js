@@ -1631,12 +1631,14 @@ function bindTasksListener() {
         tasksQuery = tasksQuery.where('uid', '==', state.user.uid);
     }
 
-    tasksListenerUnsubscribe = tasksQuery.orderBy('timestamp', 'asc')
+    tasksListenerUnsubscribe = tasksQuery
         .onSnapshot(snapshot => {
             state.tasks = [];
             snapshot.forEach(doc => {
                 state.tasks.push({ id: doc.id, ...doc.data() });
             });
+            // Sort tasks by timestamp in-memory to prevent requiring composite database indexes
+            state.tasks.sort((a, b) => (a.timestamp || 0) - (b.timestamp || 0));
             renderChatList();
             renderTasks();
             renderChecklistPanel();
