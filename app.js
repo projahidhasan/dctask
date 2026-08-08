@@ -54,6 +54,10 @@ function initApp() {
         try {
             firebase.initializeApp(firebaseConfig);
             db = firebase.firestore();
+            
+            // Auto-detect and fallback to long-polling if WebSockets are blocked by proxies/VPNs/firewalls
+            db.settings({ experimentalAutoDetectLongPolling: true });
+            
             auth = firebase.auth();
             
             // Handle redirect result for mobile devices
@@ -229,6 +233,37 @@ function setupEventListeners() {
     });
     importFileInput.addEventListener('change', importTasksFromFile);
 
+    // Auth Tabs Switching (Google vs Employee)
+    const tabGoogleBtn = document.getElementById('tabGoogleBtn');
+    const tabEmployeeBtn = document.getElementById('tabEmployeeBtn');
+    const panelGoogle = document.getElementById('panelGoogle');
+    const panelEmployee = document.getElementById('panelEmployee');
+
+    tabGoogleBtn.addEventListener('click', () => {
+        tabGoogleBtn.classList.add('active');
+        tabEmployeeBtn.classList.remove('active');
+        panelGoogle.style.display = 'block';
+        panelGoogle.classList.add('active');
+        panelEmployee.style.display = 'none';
+        panelEmployee.classList.remove('active');
+    });
+
+    tabEmployeeBtn.addEventListener('click', () => {
+        tabEmployeeBtn.classList.add('active');
+        tabGoogleBtn.classList.remove('active');
+        panelEmployee.style.display = 'block';
+        panelEmployee.classList.add('active');
+        panelGoogle.style.display = 'none';
+        panelGoogle.classList.remove('active');
+    });
+
+    // Employee Credentials Login Form Submission
+    const employeeLoginForm = document.getElementById('employeeLoginForm');
+    employeeLoginForm.addEventListener('submit', (e) => {
+        e.preventDefault();
+        handleEmployeeLogin();
+    });
+
     // Google Login and Auth handlers
     document.getElementById('googleLoginBtn').addEventListener('click', loginWithGoogle);
     document.getElementById('logoutBtn').addEventListener('click', logout);
@@ -237,10 +272,12 @@ function setupEventListeners() {
     document.getElementById('rolePersonalBtn').addEventListener('click', () => selectWorkspaceRole('personal'));
     document.getElementById('roleOwnerBtn').addEventListener('click', () => selectWorkspaceRole('owner'));
 
-    // Invite Team Member modals
+    // Create Team Member modals
     const inviteModal = document.getElementById('inviteModal');
     document.getElementById('addTeamBtn').addEventListener('click', () => {
+        document.getElementById('inviteNameInput').value = '';
         document.getElementById('inviteEmailInput').value = '';
+        document.getElementById('invitePasswordInput').value = '';
         inviteModal.classList.add('open');
     });
 
@@ -249,7 +286,7 @@ function setupEventListeners() {
     };
     document.getElementById('inviteModalCloseBtn').addEventListener('click', closeInviteModal);
     document.getElementById('inviteCancelBtn').addEventListener('click', closeInviteModal);
-    document.getElementById('inviteSubmitBtn').addEventListener('click', submitInvitation);
+    document.getElementById('inviteSubmitBtn').addEventListener('click', submitEmployeeAccount);
 
     // Edit Modal Event Handlers
     const editModal = document.getElementById('editModal');
@@ -484,11 +521,10 @@ function attemptToCompleteMatchingTodo(searchText) {
     const normalizedSearch = normalizeText(searchText);
     if (!normalizedSearch) return false;
 
-    // Find pending To-Dos (excluding notes threads)
     const pendingTodos = state.tasks.filter(t => 
         t.type === 'todo' && 
         t.status === 'pending' && 
-        !t.tags.includes('notes')
+        t.tags && !t.tags.includes('notes')
     );
     
     let match = pendingTodos.find(t => normalizeText(t.text) === normalizedSearch);
@@ -760,21 +796,23 @@ function renderChatList() {
 
     // Populate dynamic categories (custom tags entered by user)
     state.tasks.forEach(task => {
-        task.tags.forEach(tag => {
-            // Exclude system tags from dynamically appearing twice
-            const isSystemTag = ['notes', 'work', 'personal'].includes(tag);
-            
-            if (isSystemTag) return;
+        if (task.tags && Array.isArray(task.tags)) {
+            task.tags.forEach(tag => {
+                // Exclude system tags from dynamically appearing twice
+                const isSystemTag = ['notes', 'work', 'personal'].includes(tag);
+                
+                if (isSystemTag) return;
 
-            if (!chatData[tag]) {
-                chatData[tag] = {
-                    name: `#${tag}`,
-                    avatar: tag.substring(0, 2).toUpperCase(),
-                    pendingCount: 0,
-                    lastTask: null
-                };
-            }
-        });
+                if (!chatData[tag]) {
+                    chatData[tag] = {
+                        name: `#${tag}`,
+                        avatar: tag.substring(0, 2).toUpperCase(),
+                        pendingCount: 0,
+                        lastTask: null
+                    };
+                }
+            });
+        }
     });
 
     const now = Date.now();
@@ -783,9 +821,9 @@ function renderChatList() {
 
     // Compute task counts & last message previews per space
     state.tasks.forEach(task => {
-        const isNotes = task.tags.includes('notes');
-        const isWork = task.tags.includes('work');
-        const isPersonal = task.tags.includes('personal');
+        const isNotes = task.tags && task.tags.includes('notes');
+        const isWork = task.tags && task.tags.includes('work');
+        const isPersonal = task.tags && task.tags.includes('personal');
 
         const isPending = task.status === 'pending';
         const taskDueDate = task.dueDate || getLocalDateString(new Date(task.timestamp));
@@ -845,14 +883,16 @@ function renderChatList() {
         }
 
         // 6. Custom dynamic tags
-        task.tags.forEach(tag => {
-            if (chatData[tag] && !['notes', 'work', 'personal'].includes(tag)) {
-                if (isPending) chatData[tag].pendingCount++;
-                if (!chatData[tag].lastTask || task.timestamp > chatData[tag].lastTask.timestamp) {
-                    chatData[tag].lastTask = task;
+        if (task.tags && Array.isArray(task.tags)) {
+            task.tags.forEach(tag => {
+                if (chatData[tag] && !['notes', 'work', 'personal'].includes(tag)) {
+                    if (isPending) chatData[tag].pendingCount++;
+                    if (!chatData[tag].lastTask || task.timestamp > chatData[tag].lastTask.timestamp) {
+                        chatData[tag].lastTask = task;
+                    }
                 }
-            }
-        });
+            });
+        }
     });
 
     // Make sure active filter key is validated
@@ -966,14 +1006,14 @@ function renderTasks() {
     // Category routing logic
     if (state.filters.tag === 'all') {
         // Exclude notes from master inbox
-        filteredTasks = filteredTasks.filter(t => !t.tags.includes('notes'));
+        filteredTasks = filteredTasks.filter(t => t.tags && !t.tags.includes('notes'));
         chatTitle.innerText = "All Tasks";
         headerAvatar.innerHTML = "💬";
     } else if (state.filters.tag === 'today') {
         const now = Date.now();
         const todayStr = getLocalDateString(new Date(now));
         filteredTasks = filteredTasks.filter(t => {
-            if (t.tags.includes('notes')) return false;
+            if (t.tags && t.tags.includes('notes')) return false;
             const taskDueDate = t.dueDate || getLocalDateString(new Date(t.timestamp));
             return (taskDueDate === todayStr);
         });
@@ -983,14 +1023,14 @@ function renderTasks() {
         const now = Date.now();
         const tomorrowStr = getLocalDateString(new Date(now + 24 * 60 * 60 * 1000));
         filteredTasks = filteredTasks.filter(t => {
-            if (t.tags.includes('notes')) return false;
+            if (t.tags && t.tags.includes('notes')) return false;
             const taskDueDate = t.dueDate || getLocalDateString(new Date(t.timestamp));
             return taskDueDate === tomorrowStr;
         });
         chatTitle.innerText = "Tomorrow's Plan";
         headerAvatar.innerHTML = "📅";
     } else if (state.filters.tag === 'notes') {
-        filteredTasks = filteredTasks.filter(t => t.tags.includes('notes'));
+        filteredTasks = filteredTasks.filter(t => t.tags && t.tags.includes('notes'));
         chatTitle.innerText = "Saved Messages";
         headerAvatar.innerHTML = "📥";
     } else if (state.filters.tag.startsWith('employee_')) {
@@ -998,7 +1038,7 @@ function renderTasks() {
         const member = state.teamMembers.find(m => m.uid === employeeUid);
         const name = member ? member.displayName : "Employee";
         
-        filteredTasks = filteredTasks.filter(t => !t.tags.includes('notes'));
+        filteredTasks = filteredTasks.filter(t => t.tags && !t.tags.includes('notes'));
         chatTitle.innerText = `${name}'s Timeline`;
         if (member && member.photoURL) {
             headerAvatar.innerHTML = `<img src="${member.photoURL}" alt="${name}" style="width:100%; height:100%; border-radius:50%; object-fit:cover;">`;
@@ -1007,7 +1047,7 @@ function renderTasks() {
         }
     } else {
         // Workspace hashtags
-        filteredTasks = filteredTasks.filter(t => t.tags.includes(state.filters.tag));
+        filteredTasks = filteredTasks.filter(t => t.tags && t.tags.includes(state.filters.tag));
         chatTitle.innerText = `#${state.filters.tag}`;
         headerAvatar.innerHTML = state.filters.tag.substring(0, 2).toUpperCase();
     }
@@ -1109,7 +1149,7 @@ function renderTaskBubbleHtml(task) {
 
     // Checkbox container
     let checkboxHtml = '';
-    const isNotes = task.tags.includes('notes');
+    const isNotes = task.tags && task.tags.includes('notes');
 
     if (isTodo && !isCompleted && !isNotes) {
         checkboxHtml = `
@@ -1197,14 +1237,14 @@ function renderChecklistPanel() {
 
     // Category routing
     if (activeTag === 'all') {
-        filteredTasks = filteredTasks.filter(t => !t.tags.includes('notes'));
+        filteredTasks = filteredTasks.filter(t => t.tags && !t.tags.includes('notes'));
         categoryLabel.innerText = 'All Tasks';
         kpiStatsContainer.style.display = 'none';
     } else if (activeTag === 'today') {
         const now = Date.now();
         const todayStr = getLocalDateString(new Date(now));
         filteredTasks = filteredTasks.filter(t => {
-            if (t.tags.includes('notes')) return false;
+            if (t.tags && t.tags.includes('notes')) return false;
             const taskDueDate = t.dueDate || getLocalDateString(new Date(t.timestamp));
             return (taskDueDate === todayStr);
         });
@@ -1214,7 +1254,7 @@ function renderChecklistPanel() {
         const now = Date.now();
         const tomorrowStr = getLocalDateString(new Date(now + 24 * 60 * 60 * 1000));
         filteredTasks = filteredTasks.filter(t => {
-            if (t.tags.includes('notes')) return false;
+            if (t.tags && t.tags.includes('notes')) return false;
             const taskDueDate = t.dueDate || getLocalDateString(new Date(t.timestamp));
             return taskDueDate === tomorrowStr;
         });
@@ -1225,9 +1265,9 @@ function renderChecklistPanel() {
         const member = state.teamMembers.find(m => m.uid === employeeUid);
         const name = member ? member.displayName : "Employee";
         
-        filteredTasks = filteredTasks.filter(t => !t.tags.includes('notes'));
+        filteredTasks = filteredTasks.filter(t => t.tags && !t.tags.includes('notes'));
         categoryLabel.innerText = `${name}'s Timeline`;
-
+        
         // Calculate KPI Ratings for this employee
         const total = filteredTasks.length;
         const completed = filteredTasks.filter(t => t.status === 'completed').length;
@@ -1247,7 +1287,7 @@ function renderChecklistPanel() {
             </div>
         `;
     } else {
-        filteredTasks = filteredTasks.filter(t => t.tags.includes(activeTag));
+        filteredTasks = filteredTasks.filter(t => t.tags && t.tags.includes(activeTag));
         categoryLabel.innerText = `#${activeTag}`;
         kpiStatsContainer.style.display = 'none';
     }
@@ -1547,30 +1587,7 @@ async function handleAuthStateChanged(user) {
                 state.userProfile = userDoc.data();
                 completeUserLogin();
             } else {
-                const emailClean = user.email.toLowerCase();
-                const invDoc = await db.collection('invitations').doc(emailClean).get();
-                if (invDoc.exists && invDoc.data().status === 'pending') {
-                    const invitation = invDoc.data();
-                    const newProfile = {
-                        uid: user.uid,
-                        email: emailClean,
-                        displayName: user.displayName || user.email,
-                        photoURL: user.photoURL || '',
-                        role: 'employee',
-                        ownerUid: invitation.ownerUid,
-                        createdAt: firebase.firestore.FieldValue.serverTimestamp()
-                    };
-                    await db.collection('users').doc(user.uid).set(newProfile);
-                    await db.collection('invitations').doc(emailClean).update({
-                        status: 'accepted',
-                        acceptedByUid: user.uid,
-                        acceptedAt: firebase.firestore.FieldValue.serverTimestamp()
-                    });
-                    state.userProfile = newProfile;
-                    completeUserLogin();
-                } else {
-                    document.getElementById('onboardingOverlay').style.display = 'flex';
-                }
+                document.getElementById('onboardingOverlay').style.display = 'flex';
             }
         } catch (error) {
             console.error("Error reading user profile:", error);
@@ -1781,11 +1798,19 @@ window.selectEmployeeCategory = function(employeeUid) {
     setTimeout(scrollToBottom, 50);
 };
 
-async function submitInvitation() {
+async function submitEmployeeAccount() {
+    const nameInput = document.getElementById('inviteNameInput');
     const emailInput = document.getElementById('inviteEmailInput');
+    const passwordInput = document.getElementById('invitePasswordInput');
+
+    const name = nameInput.value.trim();
     const email = emailInput.value.trim().toLowerCase();
+    const password = passwordInput.value.trim();
     
-    if (!email) return;
+    if (!name || !email || !password) {
+        showToast("❌ Please fill in all fields.", "error");
+        return;
+    }
 
     const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
     if (!emailRegex.test(email)) {
@@ -1793,20 +1818,93 @@ async function submitInvitation() {
         return;
     }
 
+    if (password.length < 6) {
+        showToast("❌ Password must be at least 6 characters.", "error");
+        return;
+    }
+
     try {
-        await db.collection('invitations').doc(email).set({
+        // Register in the pending_employees queue for first-time login activation
+        await db.collection('pending_employees').doc(email).set({
             email: email,
+            password: password,
+            displayName: name,
             ownerUid: state.user.uid,
-            ownerName: state.userProfile.displayName,
-            status: 'pending',
-            invitedAt: firebase.firestore.FieldValue.serverTimestamp()
+            role: 'employee',
+            createdAt: firebase.firestore.FieldValue.serverTimestamp()
         });
 
         document.getElementById('inviteModal').classList.remove('open');
-        showToast(`✉️ Invitation sent to ${email}`, "success");
+        showToast(`✅ Created employee account: ${email}`, "success");
     } catch (error) {
-        console.error("Failed to send invitation:", error);
-        showToast("❌ Failed to send invitation.", "error");
+        console.error("Failed to register employee credentials:", error);
+        showToast("❌ Failed to create account.", "error");
+    }
+}
+
+async function handleEmployeeLogin() {
+    if (!isFirebaseEnabled) return;
+    
+    const emailInput = document.getElementById('empEmail');
+    const passwordInput = document.getElementById('empPassword');
+    const email = emailInput.value.trim().toLowerCase();
+    const password = passwordInput.value.trim();
+    
+    if (!email || !password) {
+        showToast("❌ Please fill in all fields.", "error");
+        return;
+    }
+    
+    const submitBtn = document.getElementById('employeeLoginSubmitBtn');
+    const originalBtnText = submitBtn.innerText;
+    submitBtn.innerText = "Signing in...";
+    submitBtn.disabled = true;
+
+    try {
+        // 1. Check if this employee is in the pending_employees registration queue
+        const pendingDoc = await db.collection('pending_employees').doc(email).get();
+        
+        if (pendingDoc.exists) {
+            const data = pendingDoc.data();
+            if (data.password === password) {
+                // First-time login: create the Firebase Auth account
+                const userCredential = await auth.createUserWithEmailAndPassword(email, password);
+                const user = userCredential.user;
+                
+                // Create user profile in Firestore
+                const newProfile = {
+                    uid: user.uid,
+                    email: email,
+                    displayName: data.displayName,
+                    photoURL: '',
+                    role: 'employee',
+                    ownerUid: data.ownerUid,
+                    createdAt: firebase.firestore.FieldValue.serverTimestamp()
+                };
+                
+                await db.collection('users').doc(user.uid).set(newProfile);
+                
+                // Clean up the pending employee record
+                await db.collection('pending_employees').doc(email).delete();
+                
+                showToast("🎉 Workspace account registered successfully!", "success");
+            } else {
+                showToast("❌ Incorrect password.", "error");
+                submitBtn.innerText = originalBtnText;
+                submitBtn.disabled = false;
+                return;
+            }
+        } else {
+            // 2. Already registered: standard sign-in
+            await auth.signInWithEmailAndPassword(email, password);
+            showToast("👋 Welcome back!", "success");
+        }
+    } catch (error) {
+        console.error("Employee login failed:", error);
+        showToast("❌ Authentication failed: " + error.message, "error");
+    } finally {
+        submitBtn.innerText = originalBtnText;
+        submitBtn.disabled = false;
     }
 }
 

@@ -1394,7 +1394,49 @@ body {
     color: #a0aec0;
     font-size: 14.5px;
     line-height: 1.5;
-    margin-bottom: 32px;
+    margin-bottom: 24px;
+}
+
+.auth-tabs {
+    display: flex;
+    background: rgba(0, 0, 0, 0.2);
+    border-radius: 12px;
+    padding: 4px;
+    margin-bottom: 24px;
+    border: 1px solid rgba(255, 255, 255, 0.05);
+}
+
+.auth-tab {
+    flex: 1;
+    background: none;
+    border: none;
+    color: #a0aec0;
+    padding: 10px;
+    font-family: var(--font-primary);
+    font-size: 14px;
+    font-weight: 600;
+    border-radius: 8px;
+    cursor: pointer;
+    transition: all 0.2s ease;
+}
+
+.auth-tab:hover {
+    color: #ffffff;
+}
+
+.auth-tab.active {
+    background: linear-gradient(135deg, rgba(15, 185, 177, 0.2), rgba(20, 110, 120, 0.2));
+    border: 1px solid rgba(15, 185, 177, 0.4);
+    color: #ffffff;
+    box-shadow: 0 4px 12px rgba(15, 185, 177, 0.15);
+}
+
+.auth-panel {
+    animation: fadeIn 0.3s ease-out;
+}
+
+.auth-panel p {
+    margin-bottom: 20px;
 }
 
 .google-login-btn {
